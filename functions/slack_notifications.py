@@ -232,6 +232,64 @@ def ecs_events_parser(detail_type, detail):
     return f"*Event Detail:* ```{json.dumps(detail, indent=4)}```"
 
 
+SEVERITY_ERROR = "error"
+SEVERITY_WARN = "warn"
+SEVERITY_OK = "ok"
+SEVERITY_INFO = "info"
+
+SEVERITY_COLORS = {
+    SEVERITY_ERROR: "#d32f2f",
+    SEVERITY_WARN: "#ffa000",
+    SEVERITY_OK: "#388e3c",
+    SEVERITY_INFO: "#1976d2",
+}
+
+SEVERITY_PREFIXES = {
+    SEVERITY_ERROR: "\U0001f534 ERROR:",
+    SEVERITY_WARN: "\u26a0\ufe0f WARN:",
+    SEVERITY_OK: "\u2705 OK:",
+    SEVERITY_INFO: "\u2139\ufe0f INFO:",
+}
+
+
+def get_event_severity(detail_type, detail):
+    if detail_type == "ECS Task State Change":
+        last_status = detail.get("lastStatus", "")
+        if last_status == "STOPPED":
+            return SEVERITY_ERROR
+        if last_status == "RUNNING":
+            if detail.get("healthStatus") == "UNHEALTHY":
+                return SEVERITY_ERROR
+            return SEVERITY_OK
+        return SEVERITY_INFO
+
+    if detail_type == "ECS Deployment State Change":
+        event_name = detail.get("eventName", "")
+        if detail.get("eventType") == "ERROR" or "FAILED" in event_name:
+            return SEVERITY_ERROR
+        if event_name == "SERVICE_DEPLOYMENT_COMPLETED":
+            return SEVERITY_OK
+        return SEVERITY_WARN
+
+    if detail_type == "ECS Service Action":
+        event_type = detail.get("eventType", "")
+        if event_type == "ERROR":
+            return SEVERITY_ERROR
+        if event_type == "WARN":
+            return SEVERITY_WARN
+        return SEVERITY_INFO
+
+    if detail_type == "ECS Container Instance State Change":
+        status = detail.get("status", "")
+        if status == "ACTIVE":
+            return SEVERITY_OK
+        if status in ("DRAINING", "DEREGISTERING"):
+            return SEVERITY_WARN
+        return SEVERITY_ERROR
+
+    return SEVERITY_INFO
+
+
 # Input: EventBridge Message
 # Output: Slack Message
 def event_to_slack_message(event):
@@ -249,9 +307,11 @@ def event_to_slack_message(event):
             resources.append(":dart: " + resource)
     detail = event.get("detail")
     known_detail = ecs_events_parser(detail_type, detail)
+    severity = get_event_severity(detail_type, detail)
     blocks = []
     contexts = []
-    title = f"*{detail_type}*"
+    prefix = SEVERITY_PREFIXES[severity]
+    title = f"{prefix} *{detail_type}*"
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": title}})
     if resources:
         blocks.append(
@@ -281,7 +341,8 @@ def event_to_slack_message(event):
     contexts.append({"type": "mrkdwn", "text": f"Time: {time} UTC Id: {event_id}"})
     blocks.append({"type": "context", "elements": contexts})
     blocks.append({"type": "divider"})
-    return {"blocks": blocks}
+    color = SEVERITY_COLORS[severity]
+    return {"attachments": [{"color": color, "blocks": blocks}]}
 
 
 # Slack web hook example
