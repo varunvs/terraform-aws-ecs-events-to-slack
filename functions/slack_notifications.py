@@ -217,15 +217,18 @@ def ecs_events_parser(detail_type, detail):
                     result + "\n" + ":bangbang: Stop Reason: " + detail["stoppedReason"]
                 )
             if "containers" in detail:
-                result = result + "\n" + "Task containers and their exit code:"
+                all_zero = _all_containers_exited_zero(detail)
+                if all_zero:
+                    result = result + "\n" + ":white_check_mark: All containers exited normally (exit code 0):"
+                else:
+                    result = result + "\n" + "Task containers and their exit code:"
                 for container in detail["containers"]:
+                    exit_code = container.get("exitCode", "unknown")
+                    marker = ":white_check_mark:" if exit_code == 0 else ":x:"
                     result = (
                         result
                         + "\n"
-                        + " - "
-                        + container["name"]
-                        + ": "
-                        + str(container.get("exitCode", "unknown"))
+                        + f" - {marker} {container['name']}: {exit_code}"
                     )
         return result
 
@@ -252,10 +255,19 @@ SEVERITY_PREFIXES = {
 }
 
 
+def _all_containers_exited_zero(detail):
+    containers = detail.get("containers", [])
+    if not containers:
+        return False
+    return all(c.get("exitCode") == 0 for c in containers)
+
+
 def get_event_severity(detail_type, detail):
     if detail_type == "ECS Task State Change":
         last_status = detail.get("lastStatus", "")
         if last_status == "STOPPED":
+            if _all_containers_exited_zero(detail):
+                return SEVERITY_OK
             return SEVERITY_ERROR
         if last_status == "RUNNING":
             if detail.get("healthStatus") == "UNHEALTHY":
@@ -342,7 +354,14 @@ def event_to_slack_message(event):
     blocks.append({"type": "context", "elements": contexts})
     blocks.append({"type": "divider"})
     color = SEVERITY_COLORS[severity]
-    return {"attachments": [{"color": color, "blocks": blocks}]}
+    resource_summary = ", ".join(r.replace(":dart: ", "") for r in resources)
+    notification_text = f"{prefix} {detail_type}"
+    if resource_summary:
+        notification_text += f" | {resource_summary}"
+    return {
+        "text": notification_text,
+        "attachments": [{"color": color, "blocks": blocks}],
+    }
 
 
 # Slack web hook example
