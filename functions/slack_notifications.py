@@ -354,10 +354,21 @@ def event_to_slack_message(event):
     blocks.append({"type": "context", "elements": contexts})
     blocks.append({"type": "divider"})
     color = SEVERITY_COLORS[severity]
-    resource_summary = ", ".join(r.replace(":dart: ", "") for r in resources)
     notification_text = f"{prefix} {detail_type}"
-    if resource_summary:
-        notification_text += f" | {resource_summary}"
+    if detail_type == "ECS Task State Change" and "taskDefinitionArn" in detail:
+        try:
+            arn = detail["taskDefinitionArn"]
+            task_def = arn.split(":")[5].split("/")[1] + ":" + arn.split(":")[6]
+        except Exception:
+            task_def = detail["taskDefinitionArn"]
+        notification_text += f" | {task_def}"
+        if "containers" in detail:
+            codes = [f"{c['name']}={c.get('exitCode', '?')}" for c in detail["containers"]]
+            notification_text += f" | exit: {', '.join(codes)}"
+    else:
+        resource_summary = ", ".join(r.replace(":dart: ", "") for r in resources)
+        if resource_summary:
+            notification_text += f" | {resource_summary}"
     return {
         "text": notification_text,
         "attachments": [{"color": color, "blocks": blocks}],
