@@ -59,9 +59,17 @@ module "slack_notifications" {
   description   = "Receive events from EventBridge and send them to Slack"
 
   create_package = true
-  source_path    = "${path.module}/functions"
-  handler        = "slack_notifications.lambda_handler"
-  runtime        = "python3.10"
+  # Ship only the handler; boto3 comes from the Lambda runtime. Bundling
+  # requirements.txt and the lock files pulled in old urllib3/pytest/pygments.
+  source_path = [
+    {
+      path             = "${path.module}/functions"
+      pip_requirements = false
+      patterns         = ["!.*", "slack_notifications\\.py"]
+    }
+  ]
+  handler = "slack_notifications.lambda_handler"
+  runtime = "python3.12"
 
   recreate_missing_package = var.recreate_missing_package
 
